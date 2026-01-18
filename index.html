@@ -66,6 +66,7 @@ const MASSAGE_POSITIONS = {
   "ayurvedico": [1000, 780],
 };
 const DEFAULT_POSITION = [960, 780];
+const MASSAGE_Y_OFFSET = 25;
 
 // Other fixed positions (from your script)
 const POS_EXPIRATION  = [740, 1045];
@@ -160,7 +161,7 @@ function drawAll() {
   ctx.fillStyle = COLOR_WHITE;
   ctx.textAlign = "left";
   ctx.font = `700 ${SIZE_MASSAGE}px ${family}`;
-  ctx.fillText(label, x, y);
+  ctx.fillText(label, x, y + MASSAGE_Y_OFFSET);
 }
 
 // Load template automatically
