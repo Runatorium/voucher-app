@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Voucher Massaggio</title>
+
+  <style>
+    @font-face{
+      font-family:"RuntimeRegular";
+      src:url("./RuntimeRegular-m2Odx.otf") format("opentype");
+      font-display: swap;
+    }
+
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin:0; background:#0b0c10; color:#e8e8e8; }
+    .wrap { max-width: 520px; margin: 0 auto; padding: 14px; }
+    .card { background:#151821; border:1px solid #22283a; border-radius: 14px; padding: 14px; }
+    label { display:block; font-size: 12px; opacity:.85; margin: 12px 0 6px; }
+    select, button {
+      width:100%; box-sizing:border-box;
+      border-radius:12px; border:1px solid #2a3350;
+      padding:12px; background:#0f1220; color:#e8e8e8;
+      font-size:16px;
+    }
+    button { background:#3b82f6; border:0; font-weight:700; cursor:pointer; }
+    button:active { transform: scale(.99); }
+    canvas { width:100%; height:auto; border-radius:14px; border:1px solid #2a3350; background:#0f1220; margin-top:12px; }
+    .muted { font-size:12px; opacity:.7; margin-top:10px; line-height:1.35; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+      <label>Tipo di massaggio</label>
+      <select id="massage"></select>
+
+      <button id="download">Download PNG</button>
+
+      <canvas id="canvas"></canvas>
+
+      <div class="muted">
+        Se apri da link (GitHub Pages/Netlify/Cloudflare Pages) puoi anche “Aggiungere a schermata Home”.
+        <br/>Template: 1920×1080.
+      </div>
+    </div>
+  </div>
+
+<script>
+/** === Your exact mapping (same coords) === */
+const MASSAGE_POSITIONS = {
+  "decontratturante": [900, 780],
+  "drenante": [1020, 780],
+  "linfodrenante": [940, 780],
+  "relax": [1055, 780],
+  "sportivo": [1035, 780],
+  "anticellulite": [965, 780],
+  "svedese": [1005, 780],
+  "modellante": [990, 780],
+  "lomi lomi": [1000, 780],
+  "vacuum": [1050, 780],
+  "hot stone": [1000, 780],
+  "californiano": [975, 780],
+  "riflessologico": [960, 780],
+  "ayurvedico": [1000, 780],
+};
+const DEFAULT_POSITION = [960, 780];
+
+// Other fixed positions (from your script)
+const POS_EXPIRATION  = [740, 1045];
+const POS_VALID_UNTIL = [745, 985];
+
+const TEXT_VALID_UNTIL = "Valido fino a";
+
+// Sizes (match your PIL)
+const SIZE_EXPIRATION = 50;
+const SIZE_VALID_UNTIL = 45;
+const SIZE_MASSAGE = 60;
+
+// Colors (match your PIL)
+const COLOR_WHITE = "#ffffff";
+const COLOR_PINK  = "rgb(212, 158, 167)";
+
+// Italian months
+const mesi_italiani = [
+  "", "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio",
+  "Giugno", "Luglio", "Agosto", "Settembre",
+  "Ottobre", "Novembre", "Dicembre"
+];
+
+// Month + 5 months (same intent as your Python)
+function addMonthsKeepMonthYear(dateObj, monthsToAdd) {
+  const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1);
+  d.setMonth(d.getMonth() + monthsToAdd);
+  return { m: d.getMonth() + 1, y: d.getFullYear() };
+}
+function expirationString() {
+  const today = new Date();
+  const { m, y } = addMonthsKeepMonthYear(today, 5);
+  return `${mesi_italiani[m]} ${y}`;
+}
+
+// Title Case per word: "hot stone" -> "Hot Stone"
+function titleCaseWords(s) {
+  return (s || "")
+    .split(" ")
+    .filter(Boolean)
+    .map(w => w.length ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w)
+    .join(" ");
+}
+
+const massageSelect = document.getElementById("massage");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let templateImg = new Image();
+let templateLoaded = false;
+
+function populateMassages() {
+  const keys = Object.keys(MASSAGE_POSITIONS).sort((a,b)=>a.localeCompare(b));
+  massageSelect.innerHTML = keys
+    .map(k => `<option value="${k}">${titleCaseWords(k)}</option>`)
+    .join("");
+}
+populateMassages();
+
+function setCanvasToTemplate() {
+  canvas.width = templateImg.naturalWidth;
+  canvas.height = templateImg.naturalHeight;
+}
+
+function drawAll() {
+  if (!templateLoaded) return;
+
+  // Background
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(templateImg, 0, 0);
+
+  // Use your font; fall back if missing for any reason
+  const family = "RuntimeRegular, Arial";
+  ctx.textBaseline = "alphabetic";
+
+  // Expiration date
+  ctx.fillStyle = COLOR_WHITE;
+  ctx.textAlign = "left";
+  ctx.font = `400 ${SIZE_EXPIRATION}px ${family}`;
+  ctx.fillText(expirationString(), POS_EXPIRATION[0], POS_EXPIRATION[1]);
+
+  // "Valido fino a"
+  ctx.fillStyle = COLOR_PINK;
+  ctx.font = `400 ${SIZE_VALID_UNTIL}px ${family}`;
+  ctx.fillText(TEXT_VALID_UNTIL, POS_VALID_UNTIL[0], POS_VALID_UNTIL[1]);
+
+  // Massage type (keep your manual x-position behavior)
+  const key = (massageSelect.value || "").trim().toLowerCase();
+  const [x, y] = MASSAGE_POSITIONS[key] || DEFAULT_POSITION;
+  const label = titleCaseWords(key);
+
+  ctx.fillStyle = COLOR_WHITE;
+  ctx.textAlign = "left";
+  ctx.font = `700 ${SIZE_MASSAGE}px ${family}`;
+  ctx.fillText(label, x, y);
+}
+
+// Load template automatically
+function loadTemplate() {
+  templateImg = new Image();
+  templateImg.onload = () => {
+    templateLoaded = true;
+    setCanvasToTemplate();
+    drawAll();
+  };
+  templateImg.onerror = () => {
+    alert("Impossibile caricare Massaggio.png. Mettilo nella stessa cartella di index.html.");
+  };
+  templateImg.src = "./Massaggio.png";
+}
+
+massageSelect.addEventListener("change", drawAll);
+
+document.getElementById("download").addEventListener("click", async () => {
+  if (!templateLoaded) return;
+
+  drawAll();
+  const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `voucher_${massageSelect.value.replace(/\s+/g,"_")}.png`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+// Start
+loadTemplate();
+</script>
+</body>
+</html>
