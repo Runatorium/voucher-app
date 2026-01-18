@@ -2,16 +2,20 @@
 <html lang="it">
 <head>
   <meta charset="utf-8" />
-  <meta name="screen-orientation" content="portrait">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Voucher Massaggio</title>
 
+  <!-- Your font (must be in repo root) -->
   <style>
     @font-face{
       font-family:"RuntimeRegular";
       src:url("./RuntimeRegular-m2Odx.otf") format("opentype");
       font-display: swap;
     }
+  </style>
 
+  <!-- Minimal UI styling -->
+  <style>
     :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
     body { margin:0; background:#0b0c10; color:#e8e8e8; }
     .wrap { max-width: 520px; margin: 0 auto; padding: 14px; }
@@ -28,6 +32,10 @@
     canvas { width:100%; height:auto; border-radius:14px; border:1px solid #2a3350; background:#0f1220; margin-top:12px; }
     .muted { font-size:12px; opacity:.7; margin-top:10px; line-height:1.35; }
   </style>
+
+  <!-- jsPDF (client-side PDF generation) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 
 <body>
@@ -36,13 +44,12 @@
       <label>Tipo di massaggio</label>
       <select id="massage"></select>
 
-      <button id="download">Download PNG</button>
+      <button id="download">Download PDF (Fronte + Retro)</button>
 
       <canvas id="canvas"></canvas>
 
       <div class="muted">
-        Se apri da link (GitHub Pages/Netlify/Cloudflare Pages) puoi anche “Aggiungere a schermata Home”.
-        <br/>Template: 1920×1080.
+        File richiesti nella stessa cartella: <b>Massaggio.png</b>, <b>voucher_back.png</b>, <b>RuntimeRegular-m2Odx.otf</b>.
       </div>
     </div>
   </div>
@@ -66,20 +73,20 @@ const MASSAGE_POSITIONS = {
   "ayurvedico": [1000, 780],
 };
 const DEFAULT_POSITION = [960, 780];
-const MASSAGE_Y_OFFSET = 25;
 
 // Other fixed positions (from your script)
 const POS_EXPIRATION  = [740, 1045];
 const POS_VALID_UNTIL = [745, 985];
 
-const TEXT_VALID_UNTIL = "Valido fino a";
+// Adjust baseline differences between PIL and canvas
+const MASSAGE_Y_OFFSET = 25; // you tuned this (20–30)
 
-// Sizes (match your PIL)
+// Text + styles
+const TEXT_VALID_UNTIL = "Valido fino a";
 const SIZE_EXPIRATION = 50;
 const SIZE_VALID_UNTIL = 45;
 const SIZE_MASSAGE = 60;
 
-// Colors (match your PIL)
 const COLOR_WHITE = "#ffffff";
 const COLOR_PINK  = "rgb(212, 158, 167)";
 
@@ -90,7 +97,6 @@ const mesi_italiani = [
   "Ottobre", "Novembre", "Dicembre"
 ];
 
-// Month + 5 months (same intent as your Python)
 function addMonthsKeepMonthYear(dateObj, monthsToAdd) {
   const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1);
   d.setMonth(d.getMonth() + monthsToAdd);
@@ -111,13 +117,35 @@ function titleCaseWords(s) {
     .join(" ");
 }
 
+// Helpers
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load ${src}`));
+    img.src = src;
+  });
+}
+
+function imageToPngDataUrl(img, width, height) {
+  // Safest for jsPDF: convert HTMLImageElement to PNG dataURL via canvas
+  const c = document.createElement("canvas");
+  c.width = width ?? img.naturalWidth;
+  c.height = height ?? img.naturalHeight;
+  const cctx = c.getContext("2d");
+  cctx.drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL("image/png");
+}
+
+// DOM
 const massageSelect = document.getElementById("massage");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-let templateImg = new Image();
-let templateLoaded = false;
+let frontImg = null;
+let backImg = null;
 
+// Populate dropdown
 function populateMassages() {
   const keys = Object.keys(MASSAGE_POSITIONS).sort((a,b)=>a.localeCompare(b));
   massageSelect.innerHTML = keys
@@ -126,19 +154,19 @@ function populateMassages() {
 }
 populateMassages();
 
-function setCanvasToTemplate() {
-  canvas.width = templateImg.naturalWidth;
-  canvas.height = templateImg.naturalHeight;
+function setCanvasToFront() {
+  canvas.width = frontImg.naturalWidth;
+  canvas.height = frontImg.naturalHeight;
 }
 
-function drawAll() {
-  if (!templateLoaded) return;
+function drawFront() {
+  if (!frontImg) return;
 
   // Background
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(templateImg, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(frontImg, 0, 0);
 
-  // Use your font; fall back if missing for any reason
+  // Use your font; fall back if missing
   const family = "RuntimeRegular, Arial";
   ctx.textBaseline = "alphabetic";
 
@@ -153,7 +181,7 @@ function drawAll() {
   ctx.font = `400 ${SIZE_VALID_UNTIL}px ${family}`;
   ctx.fillText(TEXT_VALID_UNTIL, POS_VALID_UNTIL[0], POS_VALID_UNTIL[1]);
 
-  // Massage type (keep your manual x-position behavior)
+  // Massage type (manual X positions + Y offset)
   const key = (massageSelect.value || "").trim().toLowerCase();
   const [x, y] = MASSAGE_POSITIONS[key] || DEFAULT_POSITION;
   const label = titleCaseWords(key);
@@ -164,36 +192,63 @@ function drawAll() {
   ctx.fillText(label, x, y + MASSAGE_Y_OFFSET);
 }
 
-// Load template automatically
-function loadTemplate() {
-  templateImg = new Image();
-  templateImg.onload = () => {
-    templateLoaded = true;
-    setCanvasToTemplate();
-    drawAll();
-  };
-  templateImg.onerror = () => {
-    alert("Impossibile caricare Massaggio.png. Mettilo nella stessa cartella di index.html.");
-  };
-  templateImg.src = "./Massaggio.png";
-}
-
-massageSelect.addEventListener("change", drawAll);
+massageSelect.addEventListener("change", drawFront);
 
 document.getElementById("download").addEventListener("click", async () => {
-  if (!templateLoaded) return;
+  if (!frontImg || !backImg) {
+    alert("Immagini non ancora caricate.");
+    return;
+  }
 
-  drawAll();
-  const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `voucher_${massageSelect.value.replace(/\s+/g,"_")}.png`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  // Ensure front is current
+  drawFront();
+
+  const { jsPDF } = window.jspdf;
+
+  // Create PDF sized exactly like your template (1920x1080), landscape, in pixels
+  const pdf = new jsPDF({
+    orientation: "landscape",
+    unit: "px",
+    format: [canvas.width, canvas.height],
+    compress: true,
+  });
+
+  // Page 1: front from existing canvas (best quality + includes text)
+  const frontDataUrl = canvas.toDataURL("image/png");
+  pdf.addImage(frontDataUrl, "PNG", 0, 0, canvas.width, canvas.height);
+
+  // Page 2: back (convert to dataURL to avoid addImage compatibility issues)
+  pdf.addPage([canvas.width, canvas.height], "landscape");
+  const backDataUrl = imageToPngDataUrl(backImg, canvas.width, canvas.height);
+  pdf.addImage(backDataUrl, "PNG", 0, 0, canvas.width, canvas.height);
+
+  const label = titleCaseWords(massageSelect.value).replace(/\s+/g, "_");
+  pdf.save(`Voucher_${label}.pdf`);
 });
 
-// Start
-loadTemplate();
+// Init: load images + wait for font
+(async function init() {
+  try {
+    // Wait for font to be ready so canvas uses it immediately
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+
+    // Load both images from repo root
+    [frontImg, backImg] = await Promise.all([
+      loadImage("./Massaggio.png"),
+      loadImage("./voucher_back.png"),
+    ]);
+
+    setCanvasToFront();
+    drawFront();
+  } catch (err) {
+    console.error(err);
+    alert(
+      "Errore caricamento file. Controlla che Massaggio.png e voucher_back.png siano nella stessa cartella di index.html (repo root)."
+    );
+  }
+})();
 </script>
 </body>
 </html>
